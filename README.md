@@ -1,6 +1,7 @@
 # Get-IntuneSoftwareInventory
 
-A helper script that will grab a software inventory based on filter and upload to an Azure Storage Blob.
+A helper script that will grab a software inventory based on filter and upload to an Azure Storage Blob. This is useful when looking for certain binaries
+for a software package that need to be replaced at a binary level. This will also dump out all of the installed applications as well.
 
 > EXAMPLE 1: Get-SoftwareInventory -Filter eaCrash* -SearchPath c:\ -Recurse
 

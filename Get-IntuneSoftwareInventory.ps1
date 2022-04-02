@@ -54,6 +54,7 @@ function Get-IntuneSoftwareInventory {
     #>
 
     [OutputType([System.String])]
+    [OutputType([PSCustomObject])]
     [CmdletBinding()]
     param (
         [switch]
@@ -83,6 +84,7 @@ function Get-IntuneSoftwareInventory {
 
     begin {
         [System.Collections.ArrayList] $fileList = @()
+        [System.Collections.ArrayList] $applicationList = @()
         $parameters = $PSBoundParameters
 
         try {
@@ -90,12 +92,18 @@ function Get-IntuneSoftwareInventory {
                 $null = New-Item -Path $LoggingPath -ItemType Directory -ErrorAction Stop
                 Write-Output "Created new directory: $($LoggingPath)"
             }
+            else {
+                # Remove older logs so we do not copy up duplicates to the Azure Storage Blob
+                Remove-Item -Path $LoggingPath\*.* -Force -ErrorAction Stop
+                Write-Output "Removed older logs from: $($LoggingPath)"
+            }
         }
         catch {
             Write-Output "ERROR: $_"
         }
 
         try {
+            # If logging is enabled this will also be copied up to the Azure Storage Blob for analysis
             if ($parameters.ContainsKey('EnableLogging')) { Start-Transcript -Path (Join-Path -Path $LoggingPath -ChildPath 'Transcript.log') -Append -ErrorAction Stop }
         }
         catch {
@@ -136,9 +144,35 @@ function Get-IntuneSoftwareInventory {
 
         try {
             # Save data to disk
-            $newLogFile = $env:COMPUTERNAME + $(Get-Random) + $Extension
-            Write-Output "Generating software inventory file $($newLogFile) and saving to $($LoggingPath)"
-            [PSCustomObject]$fileList | Export-Csv -Path (Join-Path -Path $LoggingPath -ChildPath $newLogFile) -Encoding utf8 -NoTypeInformation -ErrorAction Stop
+            $newLogFile = $env:COMPUTERNAME + "-SpecificApps-" + $(Get-Random) + $Extension
+            Write-Output "Saving specific application search file $($newLogFile) and saving to $($LoggingPath)"
+            [PSCustomObject]$fileList | Sort-Object | Export-Csv -Path (Join-Path -Path $LoggingPath -ChildPath $newLogFile) -Encoding utf8 -NoTypeInformation -ErrorAction Stop
+        }
+        catch {
+            Write-Output "ERROR: $_"
+        }
+
+        try {
+            Write-Output "Collecting full software application list from local machine"
+            $applications = Get-CimInstance -Class Win32_Product
+
+            foreach ($application in $applications) {
+                if (-NOT ($application.Name)) { continue }
+                $found = [PSCustomObject]@{
+                    MachineName  = $env:COMPUTERNAME
+                    Name         = $application.Name
+                    Vendor       = $application.Vendor
+                    Version      = $application.Version
+                    InstallDate  = $([Datetime]::ParseExact($application.InstallDate, 'yyyyMMdd', $null) -replace "00:00:00", "")
+                    PackageCache = $application.PackageCache
+                    PackageCode  = $application.PackageCode
+                }
+                $null = $applicationList.add($found)
+            }
+
+            $softwareLogFile = $env:COMPUTERNAME + "-SofwareList-" + $(Get-Random) + $Extension
+            Write-Output "Saving full application list file to $($softwareLogFile) and saving to $($LoggingPath)"
+            [PSCustomObject]$applicationList | Sort-Object Vendor | Export-Csv -Path (Join-Path -Path $LoggingPath -ChildPath $softwareLogFile) -Encoding utf8 -NoTypeInformation -ErrorAction Stop
         }
         catch {
             Write-Output "ERROR: $_"
@@ -152,7 +186,7 @@ function Get-IntuneSoftwareInventory {
             # Look for AzCopy and if not found download it
             if (-NOT (Test-Path -Path $outpath)) {
                 Write-Output "Azcopy not found! Downloading AzCopy to $($env:TEMP)"
-                Invoke-WebRequest -Uri $url -OutFile $outpath
+                Invoke-WebRequest -Uri $url -OutFile $outpath -ErrorAction Stop
 
                 # Unarchive the zip file to the temp directory
                 if (Expand-Archive -Path "$env:TEMP\azcopy_windows_amd64_10.14.1.zip" -DestinationPath $env:Temp -PassThru -Force -ErrorAction Stop) {
@@ -169,8 +203,8 @@ function Get-IntuneSoftwareInventory {
 
         if ($parameters.ContainsKey('SaveToAzure')) {
             try {
-                Write-Output "Uploading to Azure Storage Blob"
-                $cmdArguements = "copy --check-length=false $LoggingPath\$newLogFile $SasToken"
+                Write-Output "Uploading files to Azure Storage Blob"
+                $cmdArguements = "copy --check-length=false $LoggingPath\$env:COMPUTERNAME* $SasToken"
                 if (Start-Process -Filepath "$env:TEMP\azcopy_windows_amd64_10.14.1\AzCopy.exe" -NoNewWindow -ArgumentList $cmdArguements -PassThru -Wait -RedirectStandardOutput "$LoggingPath\azcopy.log" -ErrorAction Stop) {
                     Write-Output "Software inventory and Azure.log saved to $($LoggingPath)"
                     if (Get-Content -Path $LoggingPath\azcopy.log | Select-String -Pattern '403') { Write-Output "Transfer Failed" } else { Write-Output "Transfter completed successfully!" }
@@ -183,12 +217,21 @@ function Get-IntuneSoftwareInventory {
         else {
             { Write-Output "Not saving to azure. If you want to upload to azure please use the -SaveToAzure parameter." }
         }
-    }
 
-    end {
-        if ($parameters.ContainsKey('EnableLogging')) { Stop-Transcript }
+        if ($parameters.ContainsKey('EnableLogging') -and $parameters.ContainsKey('SaveToAzure')) {
+            Stop-Transcript
+            if (Rename-Item -Path "$LoggingPath\Transcript.log" -NewName $($env:COMPUTERNAME + "-Transcript.log") -Force -PassThru -ErrorAction Stop) {
+                $cmdArguements = "copy --check-length=false $LoggingPath\$env:COMPUTERNAME* $SasToken"
+                if (Start-Process -Filepath "$env:TEMP\azcopy_windows_amd64_10.14.1\AzCopy.exe" -NoNewWindow -ArgumentList $cmdArguements -PassThru -Wait -RedirectStandardOutput "$LoggingPath\azcopy.log" -ErrorAction Stop) {
+                    Write-Output "Completed!"
+                }
+            }
+            else {
+                Write-Output "Rename failed! Not uploading Transcript.log"
+            }
+        }
     }
 }
 
 # If you want to use this script locally just comment out the line below
-Get-IntuneSoftwareInventory -Recurse -Filter "YourFirst*","YourSecondFilter*" -SaveToAzure -SasToken "YourSASToken"
+Get-IntuneSoftwareInventory -Recurse -Filter "YourFirst*", "YourSecondFilter*" -SaveToAzure -SasToken "YourSASToken"
