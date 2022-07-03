@@ -1,0 +1,6 @@
+﻿{
+    "TenantId": "Your TenantID from your Azure application",
+    "ClientId": "Your ClientID from your Azure application",
+    "ClientSecret": "Your Client Secret Key from your Azure application",
+    "CertThumbPrint": "Thumbprint of local cert saved to your azure application to read from local certificate store"
+}
