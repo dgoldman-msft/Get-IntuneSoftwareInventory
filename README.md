@@ -31,9 +31,15 @@ for a software package that need to be replaced at a binary level. This will als
 
         This will search the local drive root of c:\ recursively with a search filter of eaCrash* and send an email to a specified group or account with the compressed attachment using a local certificate to authenticate to the Azure tenant
 
+> EXAMPLE 8 - Get-IntuneSoftwareInventory -SearchPath c:\ -Recurse -Filter eaCrash* -SendAsEmail -UseSettingsFromPSFramework -TenantID "YourTenantID" -ClientID "YourClientID" -SecretKey "YourSecretKey" -SmtpTo "admin@tenant.onmicrosoft.com"
+
+        This will search the local drive root of c:\ recursively with a search filter of eaCrash* and send an email to a specified group or account with the compressed attachment using the PSFramework configuration to the Azure tenant. * see note #2
+
 > Notes:
 
 * The last few lines of the script is active for Intune interaction. If you wish to use this without Intune comment out any of the last lines
+
+* If you are using EXAMPLE 8 you only need to pass in the TenantID, ClientID and SecretKey just the very first time if you are using PSFramwork. It will save the settings to the configuration system and check for them on the next run. SecretKey will be stored securely. You can also pass them in if you want your values to be saved to the PSFramework system configuration.
 
 * Your SAS token must contain the following rights (add, create, write) or your connection will fail with a 403 Authorization error
 
